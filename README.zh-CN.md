@@ -101,8 +101,6 @@ retrying=false
 
 如果你按照这个方法操作后还是打不开，建议再看一次最新启动日志。相同弹窗不一定代表相同原因，不建议直接删整个 Codex 数据目录，也没必要为了这个错误去修改 WindowsApps 权限或者关闭系统防护。
 
-另外，上传日志或截图到 GitHub 前记得把电脑用户名、邮箱、令牌等个人信息处理掉。
-
 ## 相关 Issue
 
 - [openai/codex#45858](https://github.com/openai/codex/issues/45858)：Windows 上类似的 EPERM / rename_staging 故障。
