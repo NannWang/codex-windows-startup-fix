@@ -1,25 +1,22 @@
-# Fix Codex Desktop “Unable to load organization settings” on Windows (EPERM / `rename_staging`)
+# Codex Desktop won't open on Windows: “Unable to load organization settings” / EPERM
 
-[**中文教程 / Chinese guide**](README.zh-CN.md)
+[中文记录](README.zh-CN.md)
 
-> **Verified on one machine — October 23, 2026.** This is a community workaround, **not** an official OpenAI fix. The same dialog can have different causes. Check the logs before trying it.
+I ran into this on October 23, 2026. Codex Desktop had been working on my Windows PC, then one day it wouldn't get past the **“Unable to load organization settings”** dialog. Clicking Retry did nothing.
 
-## TL;DR — the fix that worked
+The message suggested a network or proxy problem. I use Clash / Clash Verge, but hadn't changed my settings, and ChatGPT still worked in the browser. After going through a few checks, I found something more useful in the local logs.
 
-Codex Desktop displayed **“Unable to load organization settings”** and blocked startup, even though ChatGPT worked in the browser. The desktop log showed:
+**What fixed it for me:** close Codex completely, rename its local runtime cache folder, then open Codex again. I'm documenting the details because the error dialog really doesn't point you toward this.
 
-```text
-bundled_executable_relocation_failed
-errorCode=EPERM
-operation=rename_staging
-executableName=codex.exe
-```
+## The fix
 
-After **fully closing Codex** and **renaming the local `bin` cache directory to a backup**, Codex launched normally without changing the proxy, reinstalling the app, or touching the `.codex` directory.
+**Only try this if your log shows the EPERM / rename_staging error below.** The same organization-settings popup can have other causes.
 
-Run in **PowerShell**, as the normal Windows user, only if your logs show a similar error:
+1. Close Codex. Check Task Manager and end any remaining Codex processes.
+2. Open PowerShell as your normal Windows user.
+3. Run:
 
-```powershell
+~~~powershell
 $d = "$env:LOCALAPPDATA\OpenAI\Codex\bin"
 if (Test-Path $d) {
     $backup = "bin.backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
@@ -28,59 +25,41 @@ if (Test-Path $d) {
 } else {
     Write-Output "BIN_NOT_FOUND"
 }
-```
+~~~
 
-Then **relaunch Codex Desktop**. Keep the renamed backup until you've verified that your projects and sessions work.
+I got:
 
-**Important:** Do not delete `%USERPROFILE%\.codex`, and do not remove the newly generated `bin` directory. This procedure preserves the old `bin` directory by renaming it, but no workaround is guaranteed for every environment.
+~~~text
+BACKUP_OK: bin.backup-20261023-163051
+~~~
 
-## Environment and symptoms
+4. Start Codex again.
 
-| Item | Observed |
-| --- | --- |
-| OS | Windows x64; exact OS build not recorded |
-| App | Codex Desktop, installed via Microsoft Store / MSIX |
-| Installed version during diagnosis | `26.1016.6573.0` |
-| Proxy | Clash / Clash Verge; previously working settings were left unchanged |
-| WSL | Not installed |
-| Browser access | ChatGPT worked normally |
-| Desktop startup | Blocked at “Unable to load organization settings”; Retry did not help |
+It opened normally on the next attempt. I didn't have to change my proxy, install WSL, or reinstall Codex.
 
-The error appeared after the desktop client had previously worked. The message suggested checking the network, proxy, or firewall, but the evidence in this case pointed elsewhere.
+The command **renames** the old cache instead of deleting it. Keep that backup until you've checked that your projects and sessions still work. Don't delete your user profile's **.codex** folder or the newly created **bin** folder.
 
-## 1. Find the Codex Desktop logs
+## How I found the issue
 
-The directory that existed on this machine was:
+On my machine, the Codex Desktop logs were in:
 
-```text
+~~~text
 %LOCALAPPDATA%\Codex\Logs
-```
+~~~
 
-To display the most recently modified log files:
+This shows the latest files:
 
-```powershell
+~~~powershell
 Get-ChildItem "$env:LOCALAPPDATA\Codex\Logs" -File -Recurse |
     Sort-Object LastWriteTime -Descending |
-    Select-Object -First 10 LastWriteTime, Length, FullName |
-    Format-List
-```
+    Select-Object -First 10 LastWriteTime, Length, FullName
+~~~
 
-To filter error-related lines from the most recent log:
+The log from the failed startup contained these lines (paths and IDs shortened):
 
-```powershell
-$f=Get-ChildItem "$env:LOCALAPPDATA\Codex\Logs" -File -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1; if($f){Select-String -Path $f.FullName -Pattern 'bundled_executable_relocation_failed|rename_staging|EPERM|source=missing|Desktop startup policy' | Select-Object -Last 30 | ForEach-Object {$_.Line}}
-```
-
-**Privacy:** logs may contain personal paths, emails, workspace metadata, or tokens. Redact them before sharing screenshots or excerpts publicly.
-
-## 2. Relevant log evidence
-
-These are the important fields from the affected machine's October 23 log; usernames, IDs, and stack traces are omitted:
-
-```text
+~~~text
 warning bundled_executable_relocation_failed
 errorCode=EPERM
-errorName=BundledExecutableRelocationError
 operation=rename_staging
 executableName=codex.exe
 originalError={"errno":-4048,"code":"EPERM","syscall":"rename",...}
@@ -95,67 +74,39 @@ attempt=1
 phase=preparation
 reason=unavailable
 retrying=false
-```
+~~~
 
-The `rename` operation was trying to move a staged directory from this general pattern:
+Codex was trying to rename a staging directory into a final folder under:
 
-```text
-%LOCALAPPDATA%\OpenAI\Codex\bin\.staging-<hash>-<random>
-```
+~~~text
+%LOCALAPPDATA%\OpenAI\Codex\bin\
+~~~
 
-to:
+That rename failed. When I checked the expected destination, both the hash-named directory and its **codex.exe** were missing.
 
-```text
-%LOCALAPPDATA%\OpenAI\Codex\bin\<hash>
-```
+## Other things I checked
 
-A read-only check found that the expected hash-named target directory and `codex.exe` inside it were **both missing**. No matching staging directories remained at inspection time.
+For reference, here's what I tried before renaming the cache:
 
-## 3. Checks performed before the successful workaround
+- ChatGPT worked in my browser. I left my existing Clash settings alone.
+- Temporarily moving my **config.toml** out of the **.codex** folder didn't help.
+- WSL wasn't installed. I didn't install it just to troubleshoot Codex.
+- Windows reported the app package status as **Ok**.
+- The installed version was **26.1016.6573.0**. The original packaged **codex.exe** and related executables were present.
+- Creating and renaming a test directory under the runtime **bin** path worked (PowerShell returned **RENAME_OK**). So normal folder rename permission wasn't generally broken.
+- But the executable was still missing from the local runtime cache after the failed launches.
 
-| Check | Result |
-| --- | --- |
-| Browser access to ChatGPT | Worked |
-| Renamed `%USERPROFILE%\.codex\config.toml` temporarily | **Did not fix startup** |
-| Checked WSL | Not installed; no reason to install it for this incident |
-| Checked MSIX app package | Package reported `Status: Ok` |
-| Checked packaged runtime binaries | Original `codex.exe` (~342 MB) and companion executables existed in the installed application package |
-| Checked expected local runtime directory | Missing |
-| Created and renamed a temporary directory under the `bin` parent | Succeeded (`RENAME_OK`) |
-| Renamed the existing `bin` cache directory to a timestamped backup | **Codex launched normally afterward** |
+This makes the cache/deployment step the likely trouble spot. I **don't know** exactly why Windows returned EPERM. It could have been a temporary file lock or another interference during startup; I haven't proved which one.
 
-The ordinary rename test succeeding **does not** establish that runtime extraction and renaming cannot fail; an intermittent lock, security software, or a race during startup remains possible. The exact root cause was **not confirmed**.
+If the folder rename doesn't help, look at the *newest* log after the next failed launch rather than repeating this fix. Also, don't change permissions on the WindowsApps installation directory or turn off security protection just to force it through.
 
-## 4. Step-by-step recovery
+If you're sharing logs publicly, remove usernames, email addresses, tokens, and other local details first.
 
-1. **Fully close Codex Desktop.** In Task Manager, end remaining Codex processes if any. You can check PowerShell with `Get-Process *codex* -ErrorAction SilentlyContinue` (no output usually means none remain).
-2. Open **PowerShell** under your normal Windows account.
-3. Run the backup-and-rename command from the **TL;DR** section above.
-4. Confirm it prints `BACKUP_OK: bin.backup-YYYYMMDD-HHMMSS`.
-5. Relaunch Codex Desktop.
-6. Verify the UI loads, projects/sessions are visible, and a simple non-destructive operation works.
-7. **Keep the backup** until you're confident the application works normally; delete it only if you no longer need it.
+## Related reports
 
-**If the rename fails:** stop and inspect the specific access/lock error. Do not take ownership of `C:\Program Files\WindowsApps`, disable Windows security protections, or indiscriminately delete Codex data.
+- [openai/codex#45858](https://github.com/openai/codex/issues/45858) — Windows runtime relocation failures with EPERM / rename_staging.
+- [openai/codex#51586](https://github.com/openai/codex/issues/51586) — A similar organization-settings dialog, but not necessarily the same underlying cause.
 
-**If the same dialog remains:** inspect the **newest** desktop log after relaunch. The dialog is not specific to this error, and a different underlying issue may need a different fix.
+That's everything I did in this case. Hopefully it saves someone else the time I spent checking the wrong things first.
 
-## 5. Why this helped (and what we still don't know)
-
-The packaged executable existed, but the app log recorded a failure during local executable relocation, followed by a missing-runtime message. Renaming the old user-local `bin` cache allowed startup to succeed on the next launch. This is consistent with a stale or conflicting local runtime cache, **not proof** of a specific Windows permission or antivirus bug.
-
-The original error text suggested an organization-settings or network issue, so inspecting logs was essential to distinguish this case from actual login, policy, or connectivity failures.
-
-## Related Codex reports
-
-- [openai/codex#45858](https://github.com/openai/codex/issues/45858) — Windows MSIX startup/runtime relocation errors involving `rename_staging` and `EPERM`.
-- [openai/codex#42484](https://github.com/openai/codex/issues/42484) — Similar staging-directory rename failures for bundled Node runtime (a **different component and symptom**).
-- [openai/codex#51586](https://github.com/openai/codex/issues/51586) — The organization-settings dialog can also occur under different conditions, so **do not assume this workaround applies to every case**.
-
-## Share your results
-
-If this helped, consider starring this repository so other Windows users can find it. If it didn't, please include your **redacted** error keywords, Codex version, and result (without uploading complete unredacted logs).
-
----
-
-*Personal troubleshooting record. Not affiliated with or endorsed by OpenAI.*
+*My own troubleshooting notes, not an official Codex fix.*
