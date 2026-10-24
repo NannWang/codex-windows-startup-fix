@@ -1,27 +1,24 @@
-# Windows Codex 客户端提示「无法加载组织设置」：EPERM / rename_staging 修复记录
+# Codex Windows 客户端打不开，提示「无法加载组织设置」——我的排查和解决过程
 
-[English README](README.md)
+[English version](README.md)
 
-> **实际修复成功的个人案例（2026 年 10 月 23 日）**。这不是 OpenAI 官方修复方案。相同的界面报错可能由不同原因引起，请先看日志再操作。
+10 月 23 日，我的 Codex 客户端突然打不开了。之前一直能正常用，这次一启动就弹「无法加载组织设置」，点“重试”也没用。
 
-## 一句话解决方案
+弹窗让检查网络、代理或者防火墙，但我用的 Clash / Clash Verge 没改过配置，浏览器里的 ChatGPT 也正常。我一开始也在怀疑网络，后来翻了本地日志，才发现问题可能出在 Codex 自己的运行文件上。
 
-Windows 版 Codex Desktop 原来可以使用，后来打开时始终提示「无法加载组织设置」。ChatGPT 网页可以正常访问，Clash 代理配置也没有改动。
+**最后我用的办法很简单：完全退出 Codex，把本地 bin 缓存文件夹改名备份，再打开 Codex，就恢复正常了。**
 
-检查日志，发现：
+把过程记下来，给遇到相同错误的人做个参考。
 
-```text
-bundled_executable_relocation_failed
-errorCode=EPERM
-operation=rename_staging
-executableName=codex.exe
-```
+## 我是怎么解决的
 
-**最后有效的操作：完全退出 Codex，把本地 `bin` 运行缓存目录改名备份，重新启动 Codex。** 实际测试后，客户端恢复了正常启动。没有修改代理、重装软件或安装 WSL。
+先说一下：**建议确认日志里有 EPERM / rename_staging 再尝试**。光看「无法加载组织设置」这个弹窗，不能确定跟我的是同一种问题。
 
-在普通 Windows PowerShell 中执行：
+1. 先退出 Codex，在任务管理器里确认没有剩余的 Codex 进程。
+2. 打开 PowerShell，不需要特意用管理员身份。
+3. 执行下面的命令：
 
-```powershell
+~~~powershell
 $d = "$env:LOCALAPPDATA\OpenAI\Codex\bin"
 if (Test-Path $d) {
     $backup = "bin.backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
@@ -30,57 +27,39 @@ if (Test-Path $d) {
 } else {
     Write-Output "BIN_NOT_FOUND"
 }
-```
+~~~
 
-看到 `BACKUP_OK: bin.backup-<时间戳>` 后，再打开 Codex。
+我当时的返回结果是：
 
-**注意：** 只重命名旧的 `bin` 缓存，不删除 `%USERPROFILE%\.codex`。保留原备份，先确认工作区、历史会话和功能都正常。
+~~~text
+BACKUP_OK: bin.backup-20261023-163051
+~~~
 
-## 1. 故障现象和环境
+然后重新打开 Codex，就能进去了。没有改代理，也没有重装客户端。
 
-| 项目 | 本次实际情况 |
-| --- | --- |
-| 系统 | Windows x64，具体系统构建号未记录 |
-| 客户端 | Microsoft Store 安装的 Codex Desktop（MSIX） |
-| 排查时版本 | `26.1016.6573.0` |
-| 弹窗 | 「无法加载组织设置」，点击重试无效 |
-| 网页 | ChatGPT 浏览器端正常 |
-| 代理 | Clash / Clash Verge，沿用之前正常使用时的配置 |
-| WSL | 未安装 |
+这里的操作是**改名备份，不是直接删除**。旧的 bin 文件夹建议先留着，确认项目和会话都正常后再决定要不要清理。不要误删用户目录下的 **.codex**，也不要删新生成的 **bin** 文件夹。
 
-报错文案提到网络、代理、防火墙，但**这个案例的关键异常不在弹窗文案中，而在本地日志中**。
+## 日志里发现了什么
 
-## 2. 找到真正的错误日志
+我电脑上的日志实际保存在：
 
-实际存在的日志目录：
-
-```text
+~~~text
 %LOCALAPPDATA%\Codex\Logs
-```
+~~~
 
-在 PowerShell 中查看最近的日志文件：
+PowerShell 可以这样查最新的日志：
 
-```powershell
+~~~powershell
 Get-ChildItem "$env:LOCALAPPDATA\Codex\Logs" -File -Recurse |
     Sort-Object LastWriteTime -Descending |
-    Select-Object -First 10 LastWriteTime, Length, FullName |
-    Format-List
-```
+    Select-Object -First 10 LastWriteTime, Length, FullName
+~~~
 
-从最新日志里筛选关键异常：
+10 月 23 日的启动日志反复出现下面这些内容（我把个人路径和无关信息省略了）：
 
-```powershell
-$f=Get-ChildItem "$env:LOCALAPPDATA\Codex\Logs" -File -Recurse | Sort-Object LastWriteTime -Descending | Select-Object -First 1; if($f){Select-String -Path $f.FullName -Pattern 'bundled_executable_relocation_failed|rename_staging|EPERM|source=missing|Desktop startup policy' | Select-Object -Last 30 | ForEach-Object {$_.Line}}
-```
-
-**注意隐私：** 日志可能包含用户名、本地目录、邮箱、令牌等信息，公开之前要脱敏，不要上传完整的原始日志。
-
-### 实际发现的关键日志
-
-```text
+~~~text
 warning bundled_executable_relocation_failed
 errorCode=EPERM
-errorName=BundledExecutableRelocationError
 operation=rename_staging
 executableName=codex.exe
 originalError={"errno":-4048,"code":"EPERM","syscall":"rename",...}
@@ -95,71 +74,40 @@ attempt=1
 phase=preparation
 reason=unavailable
 retrying=false
-```
+~~~
 
-这意味着：Codex 在尝试把自带的运行程序从暂存目录移动到最终缓存目录时，遇到了 Windows `EPERM` 错误。随后又提示本地运行程序未找到。
+我理解的是：Codex 启动时要把自带的可执行文件放到本地缓存目录，中间有一步重命名操作被 Windows 拒绝了。
 
-预期的目录结构为：
+目标位置在：
 
-```text
-%LOCALAPPDATA%\OpenAI\Codex\bin\.staging-<哈希>-<随机后缀>
-                        ↓
-%LOCALAPPDATA%\OpenAI\Codex\bin\<哈希>
-```
+~~~text
+%LOCALAPPDATA%\OpenAI\Codex\bin\
+~~~
 
-在本次排查中，预期的目标目录不存在，其中的 `codex.exe` 也不存在；检查时没有残留对应的暂存目录。
+我检查的时候，预期的那个版本目录不存在，里面的 **codex.exe** 也没有，说明本地运行文件确实没有成功部署进去。
 
-## 3. 我已经尝试过的排查
+## 之前折腾过哪些地方
 
-| 操作 | 结果 |
-| --- | --- |
-| 浏览器访问 ChatGPT | 正常 |
-| 临时隔离 `%USERPROFILE%\.codex\config.toml` | 无效 |
-| 查看 WSL | 未安装，不需要为此强行安装 |
-| 查询 MSIX 安装状态 | `Ok` |
-| 检查安装包 | 原始 `codex.exe` 和多个配套运行文件存在 |
-| 检查本地运行目录 | `codex.exe` 缺失 |
-| 测试普通目录的创建和重命名 | `RENAME_OK` |
-| **改名备份旧 `bin` 目录后重启** | **恢复正常启动** |
+怕大家跟我一样绕弯路，把试过的也写一下：
 
-注意：普通目录可以重命名，不代表运行时的暂存目录一定不会被进程占用或拦截。最初触发 `EPERM` 的具体原因仍未确认。
+- **网络：** ChatGPT 网页能用。Clash 还是原来的配置，我没有切全局模式。
+- **配置文件：** 临时把用户目录里 **.codex** 下的 **config.toml** 改名隔离，没效果。
+- **WSL：** 我的电脑根本没安装 WSL，这次也没有为了解决问题去装。
+- **安装状态：** Windows 查询到 Codex 包状态为 **Ok**。
+- **客户端版本：** 排查时已经是 **26.1016.6573.0**。安装包里能找到原始的 **codex.exe** 和几个配套程序。
+- **文件夹权限：** 我在运行缓存目录下新建了测试文件夹，再重命名，返回 **RENAME_OK**。普通目录改名没问题，但 Codex 启动时还是报 EPERM。
 
-## 4. 具体操作步骤
+所以我现在只能确定：**这次故障跟本地运行组件部署失败有关，重建 bin 缓存后恢复了。** 至于最开始为什么会出现 EPERM，是文件被占用、权限冲突还是别的原因，我没有查到可以确定的证据。
 
-**第 1 步：完全退出 Codex。** 打开任务管理器，结束确认属于 Codex 的进程。可运行 `Get-Process *codex* -ErrorAction SilentlyContinue` 检查是否仍有相关进程。
+如果你按照这个方法操作后还是打不开，建议再看一次最新启动日志。相同弹窗不一定代表相同原因，不建议直接删整个 Codex 数据目录，也没必要为了这个错误去修改 WindowsApps 权限或者关闭系统防护。
 
-**第 2 步：打开 Windows PowerShell。** 使用日常账号执行，不必额外提升管理员权限。
+另外，上传日志或截图到 GitHub 前记得把电脑用户名、邮箱、令牌等个人信息处理掉。
 
-**第 3 步：运行前文的备份命令。** 命令只将 `%LOCALAPPDATA%\OpenAI\Codex\bin` 重命名为带时间戳的 `bin.backup-...`，**不会直接删除旧目录**。
+## 相关 Issue
 
-**第 4 步：确认输出。** 我当时返回的形式是：
+- [openai/codex#45858](https://github.com/openai/codex/issues/45858)：Windows 上类似的 EPERM / rename_staging 故障。
+- [openai/codex#51586](https://github.com/openai/codex/issues/51586)：也是「无法加载组织设置」，不过不一定跟我的原因一样。
 
-```text
-BACKUP_OK: bin.backup-20261023-163051
-```
+以上就是我这次从报错到恢复的整个过程，希望能帮到碰上同样问题的人。
 
-**第 5 步：重新打开 Codex。** 本案例中，客户端成功进入主界面。
-
-**第 6 步：检查项目和历史会话。** 建议先尝试一个不会修改文件的简单操作。旧 `bin.backup-...` 保留几天，确认一切正常后再考虑清理。
-
-如果命令报拒绝访问或重命名失败，应先查文件占用/权限；不要强行修改 `C:\Program Files\WindowsApps` 权限，也不建议关闭系统防护。
-
-如果改名缓存后仍然出现同样弹窗，请重新读取**最新一次启动**的日志。这个弹窗还有其他可能原因，不能保证此方法对所有人都有效。
-
-## 5. 技术上的理解
-
-本次安装包里有 `codex.exe`，但日志显示本地部署阶段执行目录重命名失败，随后运行组件状态为 `source=missing`。改名备份本地 `bin` 缓存后，下一次启动恢复成功，因此**旧缓存或组件部署流程很可能与问题有关**。
-
-但没有证据能进一步认定一定是杀毒软件、文件系统权限或客户端更新竞态，因此不应把这些猜测当成已证实的根因。
-
-## 参考讨论
-
-- [openai/codex#45858](https://github.com/openai/codex/issues/45858)：Windows 版本遇到类似的 `rename_staging` / `EPERM` 运行组件部署异常。
-- [openai/codex#42484](https://github.com/openai/codex/issues/42484)：捆绑 Node 组件有相似的目录重命名问题，但组件和表现不完全相同。
-- [openai/codex#51586](https://github.com/openai/codex/issues/51586)：相同的组织配置弹窗在其他环境中也可能由不同问题引起。
-
-如果这篇记录帮你解决了问题，欢迎给仓库点个 **Star**，让其他遇到相同故障的人更容易找到。
-
----
-
-*社区个人排障记录，与 OpenAI 官方无关联。*
+*个人排障记录，不是官方解决方案。*
