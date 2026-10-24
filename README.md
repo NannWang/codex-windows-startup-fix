@@ -100,7 +100,6 @@ This makes the cache/deployment step the likely trouble spot. I **don't know** e
 
 If the folder rename doesn't help, look at the *newest* log after the next failed launch rather than repeating this fix. Also, don't change permissions on the WindowsApps installation directory or turn off security protection just to force it through.
 
-If you're sharing logs publicly, remove usernames, email addresses, tokens, and other local details first.
 
 ## Related reports
 
